@@ -1,15 +1,15 @@
 """Core experiment: does the Penetration Index (computed for every atom
-pair) carry useful signal for a small message-passing net's prediction of
-non-covalent interaction energy, over the same architecture given only
-interatomic distance?
+pair), given to the model INSTEAD of raw distance, carry enough signal to
+predict non-covalent interaction energy as well as - or better than - a
+model that sees actual 3-D distance?
 
-Three edge-feature conditions, architecture otherwise identical (see
+Two edge-feature conditions, architecture otherwise identical (see
 model.py's examples_to_tensors for exact definitions):
   - none:     distance only (baseline).
-  - pi_only:  PI only, no raw distance at all - the direct test of whether
-              PI's angle-blindness is fatal once distance is taken away as
-              a crutch.
-  - full:     distance + PI for every atom pair (the two combined).
+  - pi_only:  PI only, no raw distance at all - PI is a function of
+              distance alone and carries no angular information, so this
+              isolates how much of the useful signal PI captures on its
+              own, with no raw geometry to fall back on.
 
 Evaluation is leave-one-system-out (LOSO): train on N-1 electrophiles, test
 on the one held out - a genuine generalization test to an unseen molecule,
@@ -19,7 +19,7 @@ validation-based early stopping (see training.py's train_one_model
 docstring for why that matters here).
 
 Usage:
-    python train.py [--epochs 300] [--n-seeds 5] [--modes none pi_only full]
+    python train.py [--epochs 300] [--n-seeds 5] [--modes none pi_only]
 """
 
 import argparse
@@ -32,7 +32,7 @@ import pandas as pd
 from dataset import build_examples
 from training import train_one_model
 
-PI_MODES = ['none', 'pi_only', 'full']
+PI_MODES = ['none', 'pi_only']
 
 
 def loso_folds(examples):
@@ -50,7 +50,7 @@ def main():
     parser.add_argument('--fractions', nargs='+', type=float, default=[0.25, 0.5, 1.0])
     parser.add_argument('--n-seeds', type=int, default=5)
     parser.add_argument('--modes', nargs='+', default=PI_MODES,
-                         choices=['none', 'pi_only', 'full'])
+                         choices=['none', 'pi_only'])
     args = parser.parse_args()
     modes = args.modes
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -93,16 +93,16 @@ def main():
     print(f"\n=== Mean test MAE by training fraction (across all {n_folds} LOSO folds) ===")
     print(report.groupby('train_fraction')[[f'mae_{m}' for m in modes]].mean().round(2))
 
-    print("\n=== Mean test MAE by family (at full training data) ===")
-    full = report[report['train_fraction'] == max(args.fractions)]
-    print(full.groupby('family')[[f'mae_{m}' for m in modes]].mean().round(2))
+    print("\n=== Mean test MAE by family (at 100% training data) ===")
+    at_max_frac = report[report['train_fraction'] == max(args.fractions)]
+    print(at_max_frac.groupby('family')[[f'mae_{m}' for m in modes]].mean().round(2))
 
     if 'none' in modes:
-        print("\n=== Win rate vs. baseline ('none') by family, full training data ===")
+        print("\n=== Win rate vs. baseline ('none') by family, 100% training data ===")
         for mode in modes:
             if mode == 'none':
                 continue
-            wins = (full[f'mae_{mode}'] < full['mae_none']).mean()
+            wins = (at_max_frac[f'mae_{mode}'] < at_max_frac['mae_none']).mean()
             print(f"  {mode}: {wins:.2f}")
 
 

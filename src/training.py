@@ -46,7 +46,7 @@ def train_one_model(train_examples, test_examples, pi_mode: str, epochs: int,
     y_tr_norm = (y_tr - y_mean) / y_std
     y_val_norm = (y_val - y_mean) / y_std
 
-    model = MessagePassingNet(n_edge_features=1 if pi_mode in ('none', 'pi_only') else 2)
+    model = MessagePassingNet(n_edge_features=1)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     loss_fn = nn.SmoothL1Loss()
 
