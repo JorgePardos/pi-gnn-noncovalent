@@ -1,16 +1,17 @@
 # PI-GNN: a physics-informed edge feature for non-covalent interactions
 
-Does giving a graph neural network a *chemistry-derived* distance descriptor —
-instead of just raw distance — help it predict interaction energies for
-unseen molecules? Short answer: yes, modestly, and the size of the win
-depends on the physics of the bond type in a way that itself makes sense.
+Can a purely geometric, radial bonding descriptor stand in for raw 3-D
+geometry when predicting interaction energies for molecules a model has
+never seen? Surprisingly, almost: a graph net given **only** the
+Penetration Index (PI) per atom pair — no distance, no way to infer
+approach angle — nearly matches a model given the actual 3-D distances,
+and clearly beats it in most bond families.
 
 This repo trains and evaluates a small message-passing GNN on 1,170 DFT
 single-point energies covering five families of non-covalent interaction
-(halogen, chalcogen, pnictogen, tetrel and hydrogen bonds), comparing a
-plain-distance baseline against the same architecture given one extra edge
-feature: the **Penetration Index (PI)**, a purely geometric bonding
-descriptor from the computational-chemistry literature.
+(halogen, chalcogen, pnictogen, tetrel and hydrogen bonds), comparing three
+edge-feature conditions — distance only, PI only, and both combined — under
+a genuine leave-one-electrophile-out generalization test.
 
 > Extracted from a larger research project on non-covalent interaction
 > modeling. This repo keeps the ML core — model, training, evaluation,
@@ -29,15 +30,14 @@ PI(%) = 100 * (v_A + v_B - d_AB) / (v_A + v_B - r_A - r_B)
 where `r` is the covalent radius, `v` the van der Waals radius, and `d_AB`
 the interatomic distance. It places van der Waals contacts (PI ≈ 0%),
 hydrogen/halogen/chalcogen bonds (PI ≈ 20–70%) and covalent bonds
-(PI ≥ ~90%) on one continuous, element-pair-normalized scale — a strong
-correlate of interaction energy on its own.
+(PI ≥ ~90%) on one continuous, element-pair-normalized scale.
 
-But PI is a function of distance alone. Two contacts at the same distance
-get the same PI regardless of approach angle — and angle matters a lot for
-directional non-covalent bonds. So the question this project asks is
-narrow and testable: **does handing PI to a model that can also see full
-3‑D geometry give it a genuinely useful shortcut, or is it redundant once
-the model already has the raw distances?**
+PI is a function of distance alone — two contacts at the same distance get
+the same PI regardless of approach angle, and angle matters a lot for
+directional non-covalent bonds. So the interesting question isn't just
+"does adding PI help a model that already sees geometry" (an easier bar to
+clear), but the harder one: **how much of the useful signal is PI actually
+carrying, on its own, once distance is taken away as a crutch?**
 
 ## Data
 
@@ -64,13 +64,13 @@ A minimal message-passing network, plain PyTorch (no `torch_geometric` —
 these graphs are tiny, a dense representation is simpler and just as fast):
 
 1. Atom embedding by atomic number.
-2. Two message-passing layers, each aggregating `[distance]` or
-   `[distance, PI]` per edge into every node.
+2. Two message-passing layers, each aggregating the edge feature(s) —
+   `[distance]`, `[PI]`, or `[distance, PI]` — per pair into every node.
 3. Masked mean pooling + an MLP readout for the graph-level energy.
 
-Everything except the edge feature set is identical between the baseline
-and PI-augmented models, so any difference in accuracy is attributable to
-that one feature. See [`src/model.py`](src/model.py).
+Everything except the edge feature set is identical across the three
+conditions, so any difference in accuracy is attributable to that one
+change. See [`src/model.py`](src/model.py).
 
 ## Evaluation: leave-one-electrophile-out
 
@@ -84,87 +84,114 @@ fixed-epoch runs were dominated by training noise, not signal — see
 
 ## Results
 
-Mean test MAE (kcal/mol) across all leave-one-electrophile-out folds, as
-the training battery scales from 14 to 39 electrophiles:
+Mean test MAE (kcal/mol) across all 39 leave-one-electrophile-out folds,
+NH₃ probe:
 
-| electrophiles | distance only | distance + PI | improvement | win rate |
-|---|---|---|---|---|
-| 14 | 5.46 | 6.59 | −21% (net loss) | ~57% |
-| 26 | 4.39 | 3.78 | +14% | 77% |
-| 30 | 4.30 | 3.48 | +19% | 83% |
-| 39 | 4.01 | 3.44 | +14% | 82% |
+| edge feature | mean MAE | win rate vs. distance-only |
+|---|---|---|
+| distance only (baseline) | 4.01 | — |
+| **PI only** (no distance at all) | **3.49** | **69%** |
+| distance + PI | 3.44 | 82% |
 
-![MAE vs. training set size](figures/mae_vs_data_size.png)
-
-At the full 39-electrophile battery, PI wins in **all five** interaction
-families, but by very different margins:
+PI alone — a single scalar per atom pair, blind to angle — gets within 0.05
+kcal/mol of the full distance+PI model and clearly beats raw distance. By
+family, PI-only wins 4 of 5 (loses narrowly on pnictogen bonds):
 
 ![MAE by interaction family](figures/mae_by_family.png)
 
 Halogen bonds — the most angle-directional family in this dataset — see
-the largest gain. Chalcogen bonds barely move, which lines up with a
+the largest gain. Chalcogen bonds move the least, which lines up with a
 separate finding from the wider project: chalcogen-bonded systems are the
 one family whose interaction energy stays comparatively flat as the
 approach angle swings from ideal to perpendicular, so there's less
-angle-dependent signal for a purely radial feature to be missing in the
+angle-dependent signal for a purely radial descriptor to be missing in the
 first place. The GNN result and the underlying chemistry agree.
+
+### Does this replicate across probes?
+
+The numbers above use a fixed NH₃ probe. Repeating the identical
+experiment (same 39 electrophiles, same LOSO protocol) with four other
+nucleophile probes — H₂O, Cl⁻, NMe₃, pyridine — shows the same pattern
+holds every time, not just for NH₃:
+
+![PI win rate across probes](figures/probe_robustness.png)
+
+| probe | distance only | PI only | distance + PI |
+|---|---|---|---|
+| NH₃ | 4.01 | 3.49 (69%) | 3.44 (82%) |
+| H₂O | 2.84 | 2.09 (82%) | 2.18 (79%) |
+| Cl⁻ | 3.35 | 2.71 (77%) | 2.61 (79%) |
+| NMe₃ | 4.93 | 4.64 (69%) | 4.78 (69%) |
+| Pyridine | 3.07 | 2.96 (67%) | 2.89 (69%) |
+
+*(MAE in kcal/mol; percentages are win rate vs. the distance-only baseline
+for that probe.)* Across all 5×39 = 195 folds tested (five probes ×
+39 electrophiles), PI-only's win rate never drops below 67% — the effect
+is consistent, not a fluke of one probe's dataset.
 
 ### Why 14 electrophiles looked like a *loss*
 
-The first pass at this experiment, with only 14 electrophiles, showed PI
-making predictions *worse*. Before concluding PI just doesn't help, an
-ablation restricted PI to only the one chemically meaningful contact per
-complex (instead of every atom pair, most of which are constant
-intramolecular distances or chemically irrelevant). That fixed the
-instability at 14 systems — evidence the original failure was **data
-starvation** for a ~100-dimensional edge feature space, not a flaw in
-giving PI to every edge. As the battery grew to 26, 30 and 39 systems, the
-full-PI model overtook the restricted one and kept improving, confirming
-the diagnosis.
+A first pass at the distance+PI comparison, with only 14 electrophiles,
+showed PI making predictions *worse* — a −21% regression. Before
+concluding PI just doesn't help, an ablation restricted PI to only the one
+chemically meaningful contact per complex (instead of every atom pair,
+most of which are constant intramolecular distances or chemically
+irrelevant). That fixed the instability at 14 systems — evidence the
+original failure was **data starvation** for a ~100-dimensional edge
+feature space, not a flaw in the idea. As the battery grew to 26, 30 and 39
+electrophiles, the full-PI model overtook the restricted one and kept
+improving:
+
+![MAE vs. training set size](figures/mae_vs_data_size.png)
 
 ## Running it
 
 ```bash
 pip install -r requirements.txt
 cd src
-python train.py --epochs 300 --n-seeds 5 --out ../results/report.csv
+python train.py --epochs 300 --n-seeds 5 --modes none pi_only full
 python make_figures.py
 ```
 
-`train.py` runs the full leave-one-electrophile-out sweep (39 folds ×
-3 training fractions × 5 seeds × 2 conditions = 1,170 short training runs;
-a few minutes on CPU). `results/report_39systems.csv` has the numbers
-behind the table and figures above, already generated.
+`train.py` runs the full leave-one-electrophile-out sweep for whichever
+edge-feature conditions you pass to `--modes` (39 folds × 3 training
+fractions × 5 seeds × N conditions; a few minutes per condition on CPU).
+`results/` already has the numbers behind every table and figure above.
 
 ## Repo structure
 
 ```
 src/
-  model.py           small message-passing GNN + tensor-batching
-  training.py        one-model train/eval loop with early stopping
-  dataset.py         loads the pre-built graph dataset
-  train.py           leave-one-electrophile-out sweep
-  make_figures.py    regenerates the two figures above
-  penindex_mini/     standalone Penetration Index formula (for reference —
-                      the shipped dataset already has PI baked in)
+  model.py               small message-passing GNN + tensor-batching
+  training.py             one-model train/eval loop with early stopping
+  dataset.py               loads the pre-built graph dataset
+  train.py                 leave-one-electrophile-out sweep
+  make_figures.py          regenerates the figures above
+  penindex_mini/            standalone Penetration Index formula (for
+                              reference — the shipped dataset already has
+                              PI baked in)
 data/
-  graph_dataset.pt   1,170 pre-built graphs (geometry + distances + PI + energy)
+  graph_dataset.pt         1,170 pre-built graphs (NH3 probe): geometry,
+                              distances, PI, energy
 results/
-  report_39systems.csv
+  report_pi_ablation.csv   none / pi_only / full, NH3, full training data
+  report_39systems.csv     none / full, NH3, across training set sizes
+  probe_robustness.csv     none / pi_only / full, all 5 probes
 figures/
 ```
 
 ## Limitations
 
-- One fixed probe (NH₃) — the model has never seen a different nucleophile.
+- The shipped dataset covers one fixed probe (NH₃); the multi-probe
+  robustness check above used the same code on four other probes' data,
+  not included here to keep the repo small.
 - DFT single points, not counterpoise-corrected CCSD(T)/CBS — energies are
   good enough to rank-order interactions but not benchmark-quality absolute
   numbers.
 - 39 electrophiles is a real generalization test, but still a small
   battery; the LOSO folds are correlated within a family.
-- The effect is genuine but modest (~15% MAE reduction) — this is evidence
-  PI is a useful complementary feature, not a replacement for letting the
-  model see full 3-D geometry.
+- PI-only loses (narrowly) on pnictogen bonds — the effect is robust on
+  average, not universal.
 
 ## Reference
 

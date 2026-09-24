@@ -1,12 +1,15 @@
-"""Core experiment: does adding the Penetration Index (computed for every
-atom pair) as an edge feature improve a small message-passing net's
-prediction of non-covalent interaction energy, over the same architecture
-given only interatomic distance?
+"""Core experiment: does the Penetration Index (computed for every atom
+pair) carry useful signal for a small message-passing net's prediction of
+non-covalent interaction energy, over the same architecture given only
+interatomic distance?
 
-Two edge-feature conditions, architecture otherwise identical (see
+Three edge-feature conditions, architecture otherwise identical (see
 model.py's examples_to_tensors for exact definitions):
-  - none: distance only (baseline).
-  - full: distance + PI for every atom pair.
+  - none:     distance only (baseline).
+  - pi_only:  PI only, no raw distance at all - the direct test of whether
+              PI's angle-blindness is fatal once distance is taken away as
+              a crutch.
+  - full:     distance + PI for every atom pair (the two combined).
 
 Evaluation is leave-one-system-out (LOSO): train on N-1 electrophiles, test
 on the one held out - a genuine generalization test to an unseen molecule,
@@ -16,7 +19,7 @@ validation-based early stopping (see training.py's train_one_model
 docstring for why that matters here).
 
 Usage:
-    python train.py [--epochs 300] [--n-seeds 5] [--out ../results/report.csv]
+    python train.py [--epochs 300] [--n-seeds 5] [--modes none pi_only full]
 """
 
 import argparse
@@ -29,7 +32,7 @@ import pandas as pd
 from dataset import build_examples
 from training import train_one_model
 
-PI_MODES = ['none', 'full']
+PI_MODES = ['none', 'pi_only', 'full']
 
 
 def loso_folds(examples):
@@ -43,10 +46,11 @@ def loso_folds(examples):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--out', default=os.path.join('..', 'results', 'report.csv'))
+    parser.add_argument('--out', default=os.path.join('..', 'results', 'report_pi_ablation.csv'))
     parser.add_argument('--fractions', nargs='+', type=float, default=[0.25, 0.5, 1.0])
     parser.add_argument('--n-seeds', type=int, default=5)
-    parser.add_argument('--modes', nargs='+', default=PI_MODES, choices=['none', 'full'])
+    parser.add_argument('--modes', nargs='+', default=PI_MODES,
+                         choices=['none', 'pi_only', 'full'])
     args = parser.parse_args()
     modes = args.modes
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

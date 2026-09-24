@@ -1,0 +1,6 @@
+probe,n_systems,mae_none,mae_pi_only,mae_full,win_rate_pi_only,win_rate_full
+NH3,39,4.01,3.49,3.44,0.69,0.82
+H2O,39,2.84,2.09,2.18,0.82,0.79
+Cl-,39,3.35,2.71,2.61,0.77,0.79
+NMe3,39,4.93,4.64,4.78,0.69,0.69
+Pyridine,39,3.07,2.96,2.89,0.67,0.69
