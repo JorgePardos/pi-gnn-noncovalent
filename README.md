@@ -106,6 +106,42 @@ approach angle swings from ideal to perpendicular, so there's less
 angle-dependent signal for a purely radial descriptor to be missing in the
 first place. The GNN result and the underlying chemistry agree.
 
+### Where does the gain come from? Error by approach angle
+
+PI of a single contact is blind to angle, yet the model is trained on all
+six approach angles and sees the PI of *every* atom pair — and when the
+probe rotates, the secondary pairs change distance (hence PI) even though
+the headline contact doesn't. To check whether the model actually exploits
+this, the LOSO run was repeated saving every per-point prediction
+(39 electrophiles × 5 seeds × 2 conditions = 390 models,
+`results/per_point_predictions.csv`) and the error split by angle:
+
+| angle | distance | PI only | improvement | electrophiles where PI wins | Wilcoxon p |
+|---|---|---|---|---|---|
+| 0° (ideal) | 3.74 | 3.49 | +6.7% | 25/39 | 0.13 |
+| 15° | 3.18 | 2.93 | +7.7% | 25/39 | 0.099 |
+| 30° | 2.67 | 2.43 | +9.3% | 23/39 | 0.13 |
+| 45° | 3.44 | 2.92 | +15.0% | 29/39 | 0.002 |
+| 60° | 4.76 | 3.83 | +19.6% | 27/39 | 0.001 |
+| 90° | 6.88 | 4.63 | +32.7% | 33/39 | <0.0001 |
+| **≤ 15° pooled** | 3.46 | 3.21 | +7.1% | 26/39 | 0.077 |
+| **≥ 45° pooled** | 5.03 | 3.79 | +24.5% | 33/39 | <0.0001 |
+
+![MAE by approach angle](figures/mae_by_angle.png)
+
+Near the ideal angle the gain is small and not significant; far from it,
+PI-only cuts the error by a quarter to a third. Reproduce with
+`python src/angle_analysis.py`.
+
+Caveats: (1) this repeat run gives 4.11 → 3.37 kcal/mol overall, not exactly
+the 4.01 → 3.49 above (different training entry point, run-to-run variance);
+the angular trend is the point, not the absolute values. (2) Six per-angle
+tests with no multiple-comparison correction — the monotone trend and the
+pooled comparison are the sturdier evidence. (3) |E| is larger at 90°
+(~6.8 vs ~4 kcal/mol elsewhere), so part of the relative gain there
+reflects bigger energies. (4) Why PI helps is not isolated here: element-pair
+normalization could also aid generalization to new electrophiles.
+
 ### Does this replicate across probes?
 
 The numbers above use a fixed NH₃ probe. Repeating the identical
@@ -149,6 +185,7 @@ src/
   dataset.py                loads the pre-built graph dataset
   train.py                  leave-one-electrophile-out sweep
   make_figures.py           regenerates the figures above
+  angle_analysis.py         error-by-angle table + figure
   penindex_mini/              standalone Penetration Index formula (for
                                  reference — the shipped dataset already has
                                  PI baked in)
@@ -158,6 +195,8 @@ data/
 results/
   report_pi_ablation.csv    distance vs. PI-only, NH3, per held-out system
   probe_robustness.csv      distance vs. PI-only, all 5 probes tested
+  per_point_predictions.csv per-point LOSO predictions (NH3, 5 seeds)
+  angle_breakdown.csv       error by approach angle
 figures/
 ```
 
